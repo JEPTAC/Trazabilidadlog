@@ -3,7 +3,7 @@
 
 var appEl = document.getElementById("app");
 var logoPath = (window.appSettings && window.appSettings.logoPath) || "./assets/logo-electroingenieria.jpeg";
-var storageKey = "ei_trazabilidad_secuencial_v5_jefe";
+var storageKey = "ei_trazabilidad_secuencial_v6_ios";
 var db = null;
 var auth = null;
 var firebaseReady = false;
@@ -213,10 +213,39 @@ function mobileItems(){
   var rs=routes();return [["dashboard","Inicio","⌂"],[rs.processes[0]||"cases","Panel","▤"],[canCreate()?"create":"requirements",canCreate()?"Crear":"Req.",canCreate()?"+":"↗"],["requirements","Req.","↗"],["indicators","VSM","◉"]];
 }
 
+function allMobileRoutes(){
+  var rs=routes();
+  var items=[];
+  rs.main.forEach(function(r){
+    var info=routeInfo[r]||[r,"•"];
+    items.push({route:r,label:info[0],icon:info[1],group:"Principal"});
+  });
+  rs.processes.forEach(function(r){
+    if(processes[r])items.push({route:r,label:processes[r].title,icon:processes[r].icon,group:"Macroprocesos"});
+  });
+  return items;
+}
+
+function mobileFullMenuHtml(){
+  var items=allMobileRoutes();
+  var groups={};
+  items.forEach(function(item){
+    groups[item.group]=groups[item.group]||[];
+    groups[item.group].push(item);
+  });
+  return '<section class="mobile-menu-panel"><div class="mobile-menu-head"><div><strong>Menú completo</strong><span>'+esc(roleTitle(state.user.role))+'</span></div><button class="btn btn-small" data-action="closeMobileMenu">Cerrar</button></div>'+
+    Object.keys(groups).map(function(group){
+      return '<div class="mobile-menu-group"><h3>'+esc(group)+'</h3><div class="mobile-menu-grid">'+groups[group].map(function(item){
+        return '<button class="'+(state.route===item.route?'active':'')+'" data-route="'+item.route+'"><b>'+esc(item.icon)+'</b><span>'+esc(item.label)+'</span></button>';
+      }).join("")+'</div></div>';
+    }).join("")+
+  '</section>';
+}
+
 function layout(content){
   var rs=routes();
-  appEl.innerHTML='<div class="app-layout"><aside class="sidebar"><div class="sidebar-brand"><img class="sidebar-logo" src="'+logoPath+'"><div><strong>Electroingeniería</strong><span>'+esc(roleTitle(state.user.role))+'</span></div></div><nav class="nav">'+rs.main.map(navBtn).join("")+(rs.processes.length?'<div style="height:1px;background:rgba(255,255,255,.16);margin:8px 0"></div>':"")+rs.processes.map(navBtn).join("")+'</nav><div class="sidebar-footer"><div><strong>'+esc(state.user.name)+'</strong><div>'+esc(roleTitle(state.user.role))+'</div></div><button class="btn btn-small" data-action="logout">Salir</button></div></aside><header class="mobile-top"><img class="mobile-logo" src="'+logoPath+'"><strong>'+esc(roleTitle(state.user.role))+'</strong><button class="btn btn-small" data-action="logout">Salir</button></header><main class="main">'+content+'</main><nav class="bottom-nav">'+mobileItems().map(function(x){return'<button class="'+(state.route===x[0]?'active':'')+'" data-route="'+x[0]+'"><b>'+x[2]+'</b><span>'+x[1]+'</span></button>';}).join("")+'</nav></div><div class="drawer" id="drawer"></div>';
-  qsa("[data-route]").forEach(function(b){b.onclick=function(){state.route=b.getAttribute("data-route");render();};});
+  appEl.innerHTML='<div class="app-layout"><aside class="sidebar"><div class="sidebar-brand"><img class="sidebar-logo" src="'+logoPath+'"><div><strong>Electroingeniería</strong><span>'+esc(roleTitle(state.user.role))+'</span></div></div><nav class="nav">'+rs.main.map(navBtn).join("")+(rs.processes.length?'<div style="height:1px;background:rgba(255,255,255,.16);margin:8px 0"></div>':"")+rs.processes.map(navBtn).join("")+'</nav><div class="sidebar-footer"><div><strong>'+esc(state.user.name)+'</strong><div>'+esc(roleTitle(state.user.role))+'</div></div><button class="btn btn-small" data-action="logout">Salir</button></div></aside><header class="mobile-top"><img class="mobile-logo" src="'+logoPath+'"><strong>'+esc(roleTitle(state.user.role))+'</strong><button class="btn btn-small" data-action="openMobileMenu">Menú</button></header><main class="main">'+content+'</main><nav class="bottom-nav">'+mobileItems().map(function(x){return'<button class="'+(state.route===x[0]?'active':'')+'" data-route="'+x[0]+'"><b>'+x[2]+'</b><span>'+x[1]+'</span></button>';}).join("")+'<button data-action="openMobileMenu"><b>☰</b><span>Todo</span></button></nav></div><div class="drawer" id="drawer"></div><div class="mobile-menu-overlay" id="mobileMenu"><div class="mobile-menu-backdrop" data-action="closeMobileMenu"></div>'+mobileFullMenuHtml()+'</div>';
+  qsa("[data-route]").forEach(function(b){b.onclick=function(){state.route=b.getAttribute("data-route");closeMobileMenu();render();};});
   bindActions();
 }
 
@@ -572,6 +601,17 @@ function startReminderLoop(){
   setTimeout(reminderCheck,4000);
 }
 
+
+function openMobileMenu(){
+  var m=qs("#mobileMenu");
+  if(m)m.classList.add("open");
+}
+
+function closeMobileMenu(){
+  var m=qs("#mobileMenu");
+  if(m)m.classList.remove("open");
+}
+
 function bindActions(){
   qsa("[data-action]").forEach(function(b){b.onclick=function(){var a=b.getAttribute("data-action"),id=b.getAttribute("data-id");
     if(a==="logout"){sessionStorage.removeItem(storageKey+"_session");if(auth)auth.signOut().catch(function(){});state.user=null;renderLogin();}
@@ -587,6 +627,8 @@ function bindActions(){
     if(a==="userModal")openUserModal();
     if(a==="check")updateCheck(b);
     if(a==="clearPwa")clearPwaCache();
+    if(a==="openMobileMenu")openMobileMenu();
+    if(a==="closeMobileMenu")closeMobileMenu();
     if(a==="supervise")openSupervisorNote(id);
     if(a==="notifyOn")requestNotifications();
   };});

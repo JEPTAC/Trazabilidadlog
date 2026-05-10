@@ -156,3 +156,19 @@ Paneles logísticos en consulta
 ```
 
 No debe crear pedidos desde cero. Ventas sigue siendo el origen del flujo.
+
+
+## V6 · Corrección iOS completa
+
+La versión móvil/iOS ahora muestra la misma funcionalidad que escritorio.
+
+Navegación móvil:
+
+```text
+Barra inferior = accesos rápidos
+Botón Todo / Menú = todos los paneles y macroprocesos disponibles
+Menú completo = mismas opciones del escritorio según rol
+```
+
+No se elimina ningún panel en celular.  
+Solo cambia la distribución visual para hacerlo usable en pantalla pequeña.
