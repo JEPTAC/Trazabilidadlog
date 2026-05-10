@@ -159,3 +159,20 @@ Ejemplo documento `users/{UID}`:
   "isActive": true
 }
 ```
+
+
+## V5.1 · Corrección pantalla en blanco
+
+Ajustes:
+
+- Renderiza login aunque Firebase tarde en cargar.
+- Timeout de carga de módulos Firebase.
+- Pantalla de error visible si hay fallo de JavaScript.
+- Cache/service worker actualizado para evitar versión vieja.
+- Se recomienda desplegar con:
+
+```bash
+firebase deploy --only hosting
+```
+
+Después de desplegar, abrir la app con Ctrl + F5 o borrar datos del sitio si el navegador conservaba caché.
