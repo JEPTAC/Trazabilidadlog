@@ -3,7 +3,7 @@
 
 var appEl = document.getElementById("app");
 var logoPath = (window.appSettings && window.appSettings.logoPath) || "./assets/logo-electroingenieria.jpeg";
-var storageKey = "ei_trazabilidad_secuencial_v4";
+var storageKey = "ei_trazabilidad_secuencial_v5_jefe";
 var db = null;
 var auth = null;
 var firebaseReady = false;
@@ -23,6 +23,7 @@ var roles = {
   admin:"Administrador / Desarrollador",
   gerencia:"Gerencia",
   ventas:"Ventas",
+  jefe_logistica:"Jefe de logística",
   lider_logistico:"Líder logístico",
   coordinador_logistico:"Coordinador logístico",
   aux_logistica:"Auxiliar logística",
@@ -127,12 +128,13 @@ function canAccessProcess(role,p){return processOwnerRoles(p).indexOf(role)>=0;}
 function primaryOwnerRole(p){return processOwnerRoles(p)[0]||"";}
 function processOwnerTitle(p){return processOwnerRoles(p).map(function(r){return roleTitle(r);}).join(" / ");}
 function isLeader(){return state.user && (state.user.role==="admin" || state.user.role==="lider_logistico");}
+function isJefeLogistica(){return state.user && state.user.role==="jefe_logistica";}
 function isExecutive(){return state.user && state.user.role==="gerencia";}
 function canManageUsers(){return state.user && (state.user.role==="admin" || state.user.role==="gerencia");}
 function canApprovePriority(){return state.user && state.user.role==="gerencia";}
-function canSeeAll(){return state.user && (state.user.role==="admin" || state.user.role==="gerencia");}
+function canSeeAll(){return state.user && (state.user.role==="admin" || state.user.role==="gerencia" || state.user.role==="jefe_logistica");}
 function canCreate(){return state.user && state.user.role==="ventas";}
-function defaultRoute(role){if(role==="gerencia")return"indicators";if(role==="ventas")return"create";if(role==="lider_logistico"||role==="coordinador_logistico")return"recepcion_pedidos";if(role==="aux_logistica")return"alistamiento";if(role==="caja")return"caja";return"dashboard";}
+function defaultRoute(role){if(role==="gerencia")return"indicators";if(role==="ventas")return"create";if(role==="jefe_logistica")return"dashboard";if(role==="lider_logistico"||role==="coordinador_logistico")return"recepcion_pedidos";if(role==="aux_logistica")return"alistamiento";if(role==="caja")return"caja";return"dashboard";}
 function currentProc(c){return c.currentProcess;}
 function procStats(c,p){c.processStats=c.processStats||{};c.processStats[p]=c.processStats[p]||{activeMs:0,waitMs:0,deadMs:0,startedAt:null,completedAt:null,handoffs:0};return c.processStats[p];}
 function totalMs(c){return (c.closedAt?new Date(c.closedAt).getTime():Date.now())-new Date(c.createdAt).getTime();}
@@ -193,6 +195,9 @@ function routes(){
   if(!state.user)return{main:[],processes:[]};
   if(state.user.role==="gerencia")return{main:["indicators","approvals","users"],processes:[]};
   if(state.user.role==="admin")return{main:["dashboard","cases","requirements","approvals","indicators","users","admin"],processes:Object.keys(processes)};
+  if(state.user.role==="jefe_logistica"){
+    return{main:["dashboard","cases","requirements","approvals","indicators","admin"],processes:Object.keys(processes).filter(function(k){return k!=="caja";})};
+  }
   var own=Object.keys(processes).filter(function(k){return canAccessProcess(state.user.role,k);});
   return{main:["dashboard"].concat(canCreate()?["create"]:[]).concat(["requirements","indicators"]),processes:own};
 }
@@ -204,6 +209,7 @@ function navBtn(r){
 
 function mobileItems(){
   if(state.user && state.user.role==="gerencia")return [["indicators","VSM","◉"],["approvals","Aprob.","✓"],["users","Usuarios","US"],["dashboard","Inicio","⌂"],["requirements","Req.","↗"]];
+  if(state.user && state.user.role==="jefe_logistica")return [["dashboard","Inicio","⌂"],["cases","Casos","▤"],["requirements","Req.","↗"],["approvals","Aprob.","✓"],["indicators","VSM","◉"]];
   var rs=routes();return [["dashboard","Inicio","⌂"],[rs.processes[0]||"cases","Panel","▤"],[canCreate()?"create":"requirements",canCreate()?"Crear":"Req.",canCreate()?"+":"↗"],["requirements","Req.","↗"],["indicators","VSM","◉"]];
 }
 
@@ -331,7 +337,8 @@ function renderDetail(id){
     if(c.status==="asignado"&&canAccessProcess(state.user.role,c.currentProcess))actions+='<button class="btn btn-primary" data-action="accept" data-id="'+c.id+'">Aceptar</button>';
     if(c.status==="en_proceso"&&canAccessProcess(state.user.role,c.currentProcess))actions+='<button class="btn btn-gold" data-action="wait" data-id="'+c.id+'">Requerimiento / espera</button>';
     if(c.status==="espera_ventas"&&state.user.role==="ventas")actions+='<button class="btn btn-primary" data-action="answer" data-id="'+c.id+'">Responder</button>';
-    if(c.status==="en_espera"&&state.user.role===c.assignedRole)actions+='<button class="btn btn-primary" data-action="answer" data-id="'+c.id+'">Resolver</button>';
+    if(c.status==="en_espera"&&state.user.role===c.assignedRole)actions+='<button class="btn btn-primary" data-action="answer" data-id="'+c.id+'">'+(state.user.role==="jefe_logistica"?"Aprobar / resolver":"Resolver")+'</button>';
+    if(isJefeLogistica()&&!c.closedAt)actions+='<button class="btn btn-gold" data-action="supervise" data-id="'+c.id+'">Observación jefe logística</button>';
     if(c.status==="pendiente_gerencia"&&state.user.role==="gerencia")actions+='<button class="btn btn-success" data-action="approve" data-id="'+c.id+'">Aprobar</button><button class="btn btn-danger" data-action="reject" data-id="'+c.id+'">Rechazar</button>';
     if(c.status==="en_proceso"&&canAccessProcess(state.user.role,c.currentProcess)){
       if(c.currentProcess==="facturacion")actions+='<button class="btn btn-primary" data-action="delivery" data-id="'+c.id+'">Definir facturación / entrega</button>';
@@ -356,7 +363,27 @@ function timeline(c){
 function eventList(id){var list=state.events.filter(function(e){return e.caseId===id;}).slice(0,12);if(!list.length)return'<div class="empty">Sin eventos.</div>';return list.map(function(e){return'<div style="border-bottom:1px solid #eef2f7;padding:8px 0"><strong>'+esc(e.type)+'</strong><br><span style="color:#64748b">'+esc(e.detail||e.reason||"")+' · '+fmtDate(e.timestamp)+'</span></div>';}).join("");}
 
 function renderRequirements(){var list=state.cases.filter(function(c){return c.status==="espera_ventas"||c.status==="en_espera"||c.openRequirement;});layout(header("Requerimientos","Trazabilidad de tiempos de resolución.")+caseList(list));}
-function renderApprovals(){var list=state.cases.filter(function(c){return c.status==="pendiente_gerencia";});layout(header("Aprobaciones","Pedidos prioritarios o salidas especiales enviados por ventas.")+caseList(list));}
+function renderApprovals(){
+  var list;
+  var title="Aprobaciones";
+  var subtitle="Pedidos prioritarios o salidas especiales enviados por ventas.";
+  if(state.user && state.user.role==="jefe_logistica"){
+    title="Aprobaciones logísticas";
+    subtitle="Excepciones, conformidades, requerimientos críticos y casos detenidos.";
+    list=state.cases.filter(function(c){
+      return !c.closedAt && (
+        c.assignedRole==="jefe_logistica" ||
+        (c.openRequirement && c.openRequirement.targetRole==="jefe_logistica") ||
+        c.priority==="Alta" ||
+        c.status==="en_espera" ||
+        c.status==="espera_ventas"
+      );
+    });
+  }else{
+    list=state.cases.filter(function(c){return c.status==="pendiente_gerencia";});
+  }
+  layout(header(title,subtitle)+caseList(list));
+}
 
 function renderUsers(){
   if(!canManageUsers()){layout(header("Usuarios","Acceso restringido.")+'<div class="empty">Solo admin y gerencia.</div>');return;}
@@ -406,7 +433,7 @@ function assignToProcess(c,next,detail){
 
 function openWait(id){
   var c=caseById(id), def=processes[c.currentProcess];
-  drawer(modal("Requerimiento / espera",'<form class="form" id="waitForm"><label class="field"><span>Motivo</span><select class="select" name="reason">'+def.waits.map(function(w){return'<option>'+esc(w)+'</option>';}).join("")+'</select></label><label class="field"><span>Área responsable</span><select class="select" name="role"><option value="ventas">Ventas</option><option value="coordinador_logistico">Coordinador logístico</option><option value="lider_logistico">Líder logístico</option><option value="aux_logistica">Auxiliar logística</option><option value="gerencia">Gerencia</option></select></label><label class="field"><span>Detalle</span><textarea class="textarea" name="detail"></textarea></label><button class="btn btn-primary" type="submit">Enviar requerimiento</button></form>'));
+  drawer(modal("Requerimiento / espera",'<form class="form" id="waitForm"><label class="field"><span>Motivo</span><select class="select" name="reason">'+def.waits.map(function(w){return'<option>'+esc(w)+'</option>';}).join("")+'</select></label><label class="field"><span>Área responsable</span><select class="select" name="role"><option value="ventas">Ventas</option><option value="coordinador_logistico">Coordinador logístico</option><option value="lider_logistico">Líder logístico</option><option value="jefe_logistica">Jefe de logística</option><option value="aux_logistica">Auxiliar logística</option><option value="gerencia">Gerencia</option></select></label><label class="field"><span>Detalle</span><textarea class="textarea" name="detail"></textarea></label><button class="btn btn-primary" type="submit">Enviar requerimiento</button></form>'));
   qs("#waitForm").onsubmit=function(e){e.preventDefault();var fd=new FormData(e.target);stopActive(c);c.status=fd.get("role")==="ventas"?"espera_ventas":"en_espera";c.waitStartedAt=now();c.assignedRole=fd.get("role");c.assignedName=roleTitle(fd.get("role"));c.openRequirement={reason:fd.get("reason"),detail:fd.get("detail"),targetRole:fd.get("role"),sentAt:now(),sentBy:state.user.uid,returnProcess:c.currentProcess};c.totalRequirements=Number(c.totalRequirements||0)+1;persistCase(c,{type:"REQUIREMENT_SENT",reason:fd.get("reason"),detail:fd.get("detail"),targetRole:fd.get("role")}).then(function(){closeDrawer();renderDetail(id);}).catch(function(e){showError(e.message||e);});};
 }
 function openAnswer(id){
@@ -440,6 +467,18 @@ function openClose(id){
   drawer(modal("Cerrar caso",'<form class="form" id="closeForm"><label class="field"><span>Resultado</span><select class="select" name="status"><option value="cerrado_conforme">Cerrado conforme</option><option value="cerrado_con_novedad">Cerrado con novedad</option><option value="cancelado">Cancelado</option></select></label><label class="field"><span>Detalle</span><textarea class="textarea" name="detail"></textarea></label><button class="btn btn-success" type="submit">Cerrar</button></form>'));
   qs("#closeForm").onsubmit=function(e){e.preventDefault();var fd=new FormData(e.target);stopActive(c);stopWait(c);if(c.deadStartedAt){procStats(c,c.currentProcess).deadMs+=msSince(c.deadStartedAt);c.deadStartedAt=null;}procStats(c,c.currentProcess).completedAt=now();c.status=fd.get("status");c.closedAt=now();persistCase(c,{type:"CASE_CLOSED",detail:fd.get("detail")}).then(function(){closeDrawer();renderDetail(id);}).catch(function(e){showError(e.message||e);});};
 }
+function openSupervisorNote(id){
+  var c=caseById(id);
+  drawer(modal("Observación jefe de logística",'<form class="form" id="supForm"><label class="field"><span>Tipo de intervención</span><select class="select" name="type"><option value="SUPERVISION">Seguimiento</option><option value="APPROVAL">Aprobación logística</option><option value="EXCEPTION">Excepción autorizada</option><option value="REASSIGNMENT_NOTE">Nota de reasignación</option><option value="RISK">Riesgo de atraso</option></select></label><label class="field"><span>Detalle</span><textarea class="textarea" name="detail" required></textarea></label><button class="btn btn-primary" type="submit">Registrar trazabilidad</button></form>'));
+  qs("#supForm").onsubmit=function(e){
+    e.preventDefault();
+    var fd=new FormData(e.target);
+    c.supervisionNotes=c.supervisionNotes||[];
+    c.supervisionNotes.push({type:fd.get("type"),detail:fd.get("detail"),by:state.user.uid,byName:state.user.name,at:now()});
+    persistCase(c,{type:"LOGISTICS_CHIEF_"+fd.get("type"),detail:fd.get("detail")}).then(function(){closeDrawer();renderDetail(id);}).catch(function(e){showError(e.message||e);});
+  };
+}
+
 function openUserModal(){
   var ger=state.users.filter(function(u){return u.role==="gerencia";}).length;
   drawer(modal("Crear usuario",'<form class="form" id="uForm"><label class="field"><span>Nombre</span><input class="input" name="name" required></label><label class="field"><span>Correo</span><input class="input" name="email" type="email" required></label><label class="field"><span>Contraseña temporal</span><input class="input" name="password" type="password" required minlength="6"></label><label class="field"><span>Rol</span><select class="select" name="role">'+Object.keys(roles).map(function(r){return'<option value="'+r+'" '+(r==="gerencia"&&ger>=2?"disabled":"")+'>'+esc(roles[r])+(r==="gerencia"?" · "+ger+"/2":"")+'</option>';}).join("")+'</select></label><button class="btn btn-primary" type="submit">Crear</button></form>'));
@@ -548,6 +587,7 @@ function bindActions(){
     if(a==="userModal")openUserModal();
     if(a==="check")updateCheck(b);
     if(a==="clearPwa")clearPwaCache();
+    if(a==="supervise")openSupervisorNote(id);
     if(a==="notifyOn")requestNotifications();
   };});
 }

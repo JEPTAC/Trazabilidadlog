@@ -123,3 +123,36 @@ Ejemplo:
   "createdAt": "2026-05-09T20:00:00.000Z"
 }
 ```
+
+
+## V5 · Rol jefe de logística
+
+Se agrega el rol:
+
+```text
+jefe_logistica
+```
+
+Función:
+
+```text
+Torre de control logística.
+No rompe la secuencia operativa.
+No reemplaza al auxiliar, coordinador o líder.
+Puede ver todos los casos logísticos, trazabilidad, tiempos, esperas y VSM.
+Puede registrar observaciones, aprobaciones logísticas, excepciones y riesgos.
+Puede resolver requerimientos cuando se le escalan.
+```
+
+Accesos:
+
+```text
+Dashboard general logístico
+Casos
+Requerimientos
+Aprobaciones logísticas
+VSM
+Paneles logísticos en consulta
+```
+
+No debe crear pedidos desde cero. Ventas sigue siendo el origen del flujo.

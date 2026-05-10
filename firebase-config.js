@@ -12,5 +12,5 @@ window.appSettings = {
   companyName: "Electroingeniería",
   logoPath: "./assets/logo-electroingenieria.jpeg",
   maxGerenciaUsers: 2,
-  version: "flujo-secuencial-v3"
+  version: "flujo-secuencial-v5-jefe-logistica"
 };
