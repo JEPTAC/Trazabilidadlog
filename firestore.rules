@@ -2,17 +2,9 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() {
-      return request.auth != null;
-    }
-
-    function userDoc() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-    }
-
-    function role() {
-      return userDoc().role;
-    }
+    function signedIn() { return request.auth != null; }
+    function userDoc() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function role() { return userDoc().role; }
 
     match /users/{userId} {
       allow read: if signedIn();
@@ -20,15 +12,12 @@ service cloud.firestore {
     }
 
     match /cases/{caseId} {
-      allow read: if signedIn();
-      allow create: if signedIn();
-      allow update: if signedIn();
+      allow read, create, update: if signedIn();
       allow delete: if signedIn() && role() == 'admin';
     }
 
     match /case_events/{eventId} {
-      allow read: if signedIn();
-      allow create: if signedIn();
+      allow read, create: if signedIn();
       allow update, delete: if false;
     }
   }

@@ -2,10 +2,12 @@
   "name": "Electroingeniería Trazabilidad Logística",
   "short_name": "EI Logística",
   "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
+  "orientation": "portrait-primary",
   "background_color": "#F6F8FC",
   "theme_color": "#061B46",
-  "orientation": "portrait-primary",
+  "description": "App de trazabilidad logística, requerimientos, tiempos, aprobaciones y VSM.",
   "icons": [
     {
       "src": "./assets/app-icon.svg",
