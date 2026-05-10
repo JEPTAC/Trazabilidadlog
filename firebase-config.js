@@ -12,6 +12,5 @@ window.appSettings = {
   companyName: "Electroingeniería",
   logoPath: "./assets/logo-electroingenieria.jpeg",
   maxGerenciaUsers: 2,
-  requireFirebase: true,
-  version: "produccion-github-firebase-v1"
+  version: "flujo-secuencial-v3"
 };

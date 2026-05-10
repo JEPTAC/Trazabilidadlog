@@ -8,18 +8,18 @@
   <meta name="apple-mobile-web-app-title" content="EI Logística">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Electroingeniería · Trazabilidad Logística</title>
-  <link rel="preload" href="./assets/logo-electroingenieria.jpeg" as="image">
   <link rel="manifest" href="./manifest.json">
   <link rel="apple-touch-icon" href="./assets/app-icon.svg">
-  <link rel="stylesheet" href="./styles.css?v=pwa1">
+  <link rel="preload" href="./assets/logo-electroingenieria.jpeg" as="image">
+  <link rel="stylesheet" href="./styles.css?v=seq4">
 </head>
 <body>
   <div id="app" class="app-shell">
     <main class="boot-screen">
       <section class="boot-card">
         <img src="./assets/logo-electroingenieria.jpeg" alt="Electroingeniería">
-        <strong>Cargando aplicación</strong>
-        <span>Inicializando conexión segura</span>
+        <strong>Cargando trazabilidad logística</strong>
+        <span>Inicializando flujo secuencial iOS</span>
       </section>
     </main>
   </div>
@@ -28,41 +28,22 @@
   <script defer src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
   <script defer src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <script defer src="./firebase-config.js?v=pwa1"></script>
-  <script defer src="./app.js?v=pwa1"></script>
-
+  <script defer src="./firebase-config.js?v=seq4"></script>
+  <script defer src="./app.js?v=seq4"></script>
   <script>
     window.addEventListener("load", function () {
       if (!("serviceWorker" in navigator)) return;
-
-      navigator.serviceWorker.register("./service-worker.js", { scope: "./" })
-        .then(function (registration) {
-          registration.update();
-
-          if (registration.waiting) {
-            registration.waiting.postMessage({ type: "SKIP_WAITING" });
-          }
-
-          registration.addEventListener("updatefound", function () {
-            var worker = registration.installing;
-            if (!worker) return;
-            worker.addEventListener("statechange", function () {
-              if (worker.state === "installed" && navigator.serviceWorker.controller) {
-                worker.postMessage({ type: "SKIP_WAITING" });
-              }
-            });
-          });
-        })
-        .catch(function () {});
-
+      navigator.serviceWorker.register("./service-worker.js", { scope: "./" }).then(function(reg){
+        reg.update();
+        if (reg.waiting) reg.waiting.postMessage({type:"SKIP_WAITING"});
+      }).catch(function(){});
       var refreshed = false;
       navigator.serviceWorker.addEventListener("controllerchange", function () {
         if (refreshed) return;
         refreshed = true;
-        window.location.reload();
+        location.reload();
       });
     });
   </script>
-
 </body>
 </html>
