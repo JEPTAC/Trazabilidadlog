@@ -117,3 +117,28 @@ Esta versión no necesita `firebase deploy` para publicarse.
 Solo requiere GitHub Pages para publicar los archivos estáticos.
 
 Firebase se usa únicamente como backend de datos y autenticación.
+
+
+## Corrección pantalla de error `Unexpected token 'async'`
+
+Esta versión usa `app.github.fix.js` para romper caché anterior de GitHub Pages o service worker.
+
+Después de subir los archivos:
+
+1. Espera 1 a 2 minutos.
+2. Abre la URL con `?v=fix2`.
+3. Presiona `Ctrl + F5`.
+
+Ejemplo:
+
+```text
+https://TU_USUARIO.github.io/TU_REPOSITORIO/?v=fix2
+```
+
+Si todavía carga una versión anterior, en el navegador:
+
+```text
+F12 → Application → Storage → Clear site data
+```
+
+o abre en una ventana incógnita.

@@ -23,10 +23,28 @@
   <link rel="apple-touch-icon" href="./assets/app-icon.svg">
   <link rel="preload" href="./assets/logo-electroingenieria.jpeg" as="image">
   <link rel="stylesheet" href="./styles.css">
+
+  <script>
+    (function clearOldAppCache(){
+      try {
+        if ("serviceWorker" in navigator) {
+          navigator.serviceWorker.getRegistrations().then(function(regs){
+            regs.forEach(function(reg){ reg.unregister(); });
+          }).catch(function(){});
+        }
+        if (window.caches) {
+          caches.keys().then(function(keys){
+            keys.forEach(function(key){ caches.delete(key); });
+          }).catch(function(){});
+        }
+      } catch(e) {}
+    })();
+  </script>
+
 </head>
 <body>
   <div id="app" class="app-shell"></div>
   <script type="module" src="./firebase-config.js"></script>
-  <script type="module" src="./app.js"></script>
+  <script type="module" src="./app.github.fix.js?v=2"></script>
 </body>
 </html>
