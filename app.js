@@ -8,6 +8,7 @@ var db = null;
 var auth = null;
 var firebaseReady = false;
 var firebaseInitError = null;
+var INTEGRATED_CUTS_URL = "./corte-control/index.html";
 
 var state = {
   user: null,
@@ -27,6 +28,7 @@ var roles = {
   lider_logistico:"Líder logístico",
   coordinador_logistico:"Coordinador logístico",
   aux_logistica:"Auxiliar logística",
+  auxiliar_corte:"Auxiliar de corte",
   caja:"Caja",
   inventarios:"Inventarios",
   auditoria:"Auditoría"
@@ -35,6 +37,7 @@ var roles = {
 var FLOW = [
   "recepcion_pedidos",
   "alistamiento",
+  "corte_cable",
   "compromiso_mercancia",
   "facturacion",
   "caja",
@@ -48,15 +51,21 @@ var FLOW = [
 var processes = {
   recepcion_pedidos:{
     code:"S-PR-2", title:"Recepción de pedidos", ownerRoles:["lider_logistico","coordinador_logistico"], icon:"RP",
-    checklist:["Contenido del pedido completo","Cliente identificado","NIT o identificación visible","Referencia completa","Cantidad completa","Unidad de medida completa","Tipo de entrega definido","Dirección de entrega definida","Bodega definida","Forma de pago definida","Observaciones revisadas","Autorización comercial si aplica","Pedido listo para alistamiento"],
-    waits:["Falta referencia","Falta cantidad","Falta unidad de medida","Falta tipo de entrega","Falta dirección de entrega","Falta bodega","Falta forma de pago","Falta autorización comercial","Falta aclaración del asesor","Documento ilegible"],
+    checklist:["Pedido registrado por ventas","PDF del pedido cargado en recepción","Documento legible y completo","Número de pedido identificado","Cliente identificado","Referencias del pedido identificadas","Cantidades y unidades de medida identificadas","Tipo PVC/PVN validado","Tipo de entrega definido","Forma de pago definida","Observaciones revisadas","Pedido listo para alistamiento"],
+    waits:["Falta PDF del pedido","PDF ilegible","Falta referencia","Falta cantidad","Falta unidad de medida","Falta tipo de entrega","Falta forma de pago","Falta autorización comercial","Falta aclaración del asesor","Pedido no coincide con lo registrado por ventas"],
     next:["alistamiento"]
   },
   alistamiento:{
     code:"S-PR-4", title:"Alistamiento de mercancía", ownerRoles:["aux_logistica"], icon:"AL",
-    checklist:["Pedido recibido","Productos y cantidades ubicadas","Referencia coincide","Descripción coincide","Cantidad coincide","Unidad de medida coincide","Ubicación correcta","Estado físico conforme","Lote validado si aplica","Cable validado si aplica","Remanente mínimo validado si aplica"],
-    waits:["No se encuentra mercancía","Cantidad insuficiente","Referencia diferente","Unidad de medida diferente","Lote diferente","Ubicación errada","Mercancía averiada","Remanente menor a 50 m","Requiere autorización de líder logístico"],
+    checklist:["Pedido recibido desde recepción","Productos y cantidades ubicadas","Referencia coincide","Descripción coincide","Cantidad coincide","Unidad de medida coincide","Ubicación correcta","Estado físico conforme","Líneas que requieren corte definidas","Cortes enviados a app de corte si aplica","Cortes terminados o en seguimiento","Mercancía lista para compromiso"],
+    waits:["No se encuentra mercancía","Cantidad insuficiente","Referencia diferente","Unidad de medida diferente","Ubicación errada","Mercancía averiada","Remanente crítico","Requiere aprobación logística","Requiere ajuste de ventas","Corte pendiente por finalizar"],
     next:["compromiso_mercancia"]
+  },
+  corte_cable:{
+    code:"S-PR-9", title:"Corte de cable", ownerRoles:["auxiliar_corte"], icon:"CT",
+    checklist:["Solicitud de corte recibida","Referencia validada","Metros solicitados validados","Disponibilidad verificada","Remanente calculado","Aprobación gestionada si aplica","Foto inicial anexada","Cronómetro iniciado","Cronómetro finalizado","Foto final anexada","Corte guardado en Firebase de corte"],
+    waits:["Cable no disponible en su totalidad para el corte","Chipa con cantidad mayor que se puede vender toda","Mal registro del pedido","Otros","Pendiente iniciar corte","Pendiente foto inicial","Pendiente aprobación por remanente","Pendiente disponibilidad física","Pendiente finalizar corte","Pendiente foto final"],
+    next:[]
   },
   compromiso_mercancia:{
     code:"S-PR-4", title:"Comprometer mercancía", ownerRoles:["lider_logistico","coordinador_logistico"], icon:"CM",
@@ -110,7 +119,7 @@ var processes = {
 
 var routeInfo = {
   dashboard:["Inicio","IN"], cases:["Casos","CS"], create:["Crear pedido","CR"], requirements:["Requerimientos","RQ"],
-  approvals:["Aprobaciones","AU"], indicators:["VSM","VS"], users:["Usuarios","US"], admin:["Admin","AD"]
+  approvals:["Aprobaciones","AU"], corte_cable:["Cortes","CT"], indicators:["VSM","VS"], users:["Usuarios","US"], admin:["Admin","AD"]
 };
 
 function qs(sel,root){return (root||document).querySelector(sel);}
@@ -128,13 +137,15 @@ function canAccessProcess(role,p){return processOwnerRoles(p).indexOf(role)>=0;}
 function primaryOwnerRole(p){return processOwnerRoles(p)[0]||"";}
 function processOwnerTitle(p){return processOwnerRoles(p).map(function(r){return roleTitle(r);}).join(" / ");}
 function isLeader(){return state.user && (state.user.role==="admin" || state.user.role==="lider_logistico");}
+function isCutOperator(){return state.user && state.user.role==="auxiliar_corte";}
 function isJefeLogistica(){return state.user && state.user.role==="jefe_logistica";}
 function isExecutive(){return state.user && state.user.role==="gerencia";}
 function canManageUsers(){return state.user && (state.user.role==="admin" || state.user.role==="gerencia");}
 function canApprovePriority(){return state.user && state.user.role==="gerencia";}
 function canSeeAll(){return state.user && (state.user.role==="admin" || state.user.role==="gerencia" || state.user.role==="jefe_logistica");}
 function canCreate(){return state.user && state.user.role==="ventas";}
-function defaultRoute(role){if(role==="gerencia")return"indicators";if(role==="ventas")return"create";if(role==="jefe_logistica")return"dashboard";if(role==="lider_logistico"||role==="coordinador_logistico")return"recepcion_pedidos";if(role==="aux_logistica")return"alistamiento";if(role==="caja")return"caja";return"dashboard";}
+function canSeeKpis(){return canSeeAll();}
+function defaultRoute(role){if(role==="gerencia")return"indicators";if(role==="ventas")return"create";if(role==="jefe_logistica")return"dashboard";if(role==="auxiliar_corte")return"corte_cable";if(role==="lider_logistico"||role==="coordinador_logistico")return"recepcion_pedidos";if(role==="aux_logistica")return"alistamiento";if(role==="caja")return"caja";return"dashboard";}
 function currentProc(c){return c.currentProcess;}
 function procStats(c,p){c.processStats=c.processStats||{};c.processStats[p]=c.processStats[p]||{activeMs:0,waitMs:0,deadMs:0,startedAt:null,completedAt:null,handoffs:0};return c.processStats[p];}
 function totalMs(c){return (c.closedAt?new Date(c.closedAt).getTime():Date.now())-new Date(c.createdAt).getTime();}
@@ -193,13 +204,14 @@ function statusChip(st){
 
 function routes(){
   if(!state.user)return{main:[],processes:[]};
+  if(state.user.role==="auxiliar_corte")return{main:["corte_cable"],processes:[]};
   if(state.user.role==="gerencia")return{main:["indicators","approvals","users"],processes:[]};
   if(state.user.role==="admin")return{main:["dashboard","cases","requirements","approvals","indicators","users","admin"],processes:Object.keys(processes)};
   if(state.user.role==="jefe_logistica"){
     return{main:["dashboard","cases","requirements","approvals","indicators","admin"],processes:Object.keys(processes).filter(function(k){return k!=="caja";})};
   }
   var own=Object.keys(processes).filter(function(k){return canAccessProcess(state.user.role,k);});
-  return{main:["dashboard"].concat(canCreate()?["create"]:[]).concat(["requirements","indicators"]),processes:own};
+  return{main:["dashboard"].concat(canCreate()?["create"]:[]).concat(["requirements"]),processes:own};
 }
 
 function navBtn(r){
@@ -208,9 +220,10 @@ function navBtn(r){
 }
 
 function mobileItems(){
+  if(state.user && state.user.role==="auxiliar_corte")return [["corte_cable","Cortes","CT"]];
   if(state.user && state.user.role==="gerencia")return [["indicators","VSM","◉"],["approvals","Aprob.","✓"],["users","Usuarios","US"],["dashboard","Inicio","⌂"],["requirements","Req.","↗"]];
   if(state.user && state.user.role==="jefe_logistica")return [["dashboard","Inicio","⌂"],["cases","Casos","▤"],["requirements","Req.","↗"],["approvals","Aprob.","✓"],["indicators","VSM","◉"]];
-  var rs=routes();return [["dashboard","Inicio","⌂"],[rs.processes[0]||"cases","Panel","▤"],[canCreate()?"create":"requirements",canCreate()?"Crear":"Req.",canCreate()?"+":"↗"],["requirements","Req.","↗"],["indicators","VSM","◉"]];
+  var rs=routes();return [["dashboard","Inicio","⌂"],[rs.processes[0]||"cases","Panel","▤"],[canCreate()?"create":"requirements",canCreate()?"Crear":"Req.",canCreate()?"+":"↗"],["requirements","Req.","↗"]];
 }
 
 function allMobileRoutes(){
@@ -308,9 +321,61 @@ function renderCases(){
 
 function renderCreate(){
   if(!canCreate()){layout(header("Crear pedido","Acceso restringido.")+'<div class="empty">Solo ventas inicia pedidos. Los demás roles reciben por secuencia.</div>');return;}
-  layout(header("Crear pedido","Ventas inicia el flujo normal o prioritario hacia gerencia.")+'<section class="card"><form class="form" id="caseForm"><label class="field"><span>PDF pedido S-FT-33 opcional</span><input class="input" type="file" name="pdf" id="pdfInput" accept="application/pdf"></label><div id="pdfBox" class="notice">Si cargas PDF, la app intentará leer número de pedido, cliente, vendedor, pago, entrega y referencias.</div><div class="grid grid-2"><label class="field"><span>Número / pedido / referencia</span><input class="input" name="reference" id="reference" required placeholder="PVN-0000"></label><label class="field"><span>Cliente</span><input class="input" name="client" id="client" placeholder="Nombre del cliente"></label></div><div class="grid grid-2"><label class="field"><span>Tipo de gestión</span><select class="select" name="priorityMode"><option value="normal">Pedido normal a logística</option><option value="gerencia">Pedido prioritario / salida especial a gerencia</option></select></label><label class="field"><span>Motivo prioridad</span><input class="input" name="priorityReason" placeholder="Urgencia, cliente crítico, autorización especial"></label></div><div class="grid grid-2"><label class="field"><span>Tipo de entrega esperado</span><select class="select" name="requestedDelivery" id="requestedDelivery"><option value="">Sin definir</option><option value="cliente_punto">Cliente en punto</option><option value="cliente_recoge">Cliente recoge</option><option value="despacho_local">Despacho local</option><option value="despacho_nacional">Despacho nacional</option></select></label><label class="field"><span>Forma de pago</span><input class="input" name="paymentCondition" id="paymentCondition"></label></div><label class="field"><span>Observación</span><textarea class="textarea" name="description" id="description"></textarea></label><button class="btn btn-primary" type="submit">Crear y enviar</button></form></section>');
+  layout(header("Crear pedido","Ventas registra únicamente el nombre o número del pedido. El PDF se carga en Recepción de pedidos para iniciar la verificación documental.")+'<section class="card"><form class="form" id="caseForm"><div class="notice"><strong>Flujo documental:</strong> ventas registra el pedido PVC/PVN y recepción carga el PDF oficial.</div><div class="grid grid-2"><label class="field"><span>Número / nombre del pedido</span><input class="input" name="reference" id="reference" required placeholder="PVC-0000 / PVN-0000"></label><label class="field"><span>Tipo de pedido</span><select class="select" name="orderKind" id="orderKind"><option value="PVC">PVC</option><option value="PVN">PVN</option><option value="VENTAS">Otro ventas</option><option value="ALUMBRADO">Alumbrado</option></select></label></div><div class="grid grid-2"><label class="field"><span>Cliente</span><input class="input" name="client" id="client" placeholder="Nombre del cliente"></label><label class="field"><span>Tipo de gestión</span><select class="select" name="priorityMode"><option value="normal">Pedido normal a logística</option><option value="gerencia">Pedido prioritario / salida especial a gerencia</option></select></label></div><div class="grid grid-2"><label class="field"><span>Motivo prioridad</span><input class="input" name="priorityReason" placeholder="Urgencia, cliente crítico, autorización especial"></label><label class="field"><span>Tipo de entrega esperado</span><select class="select" name="requestedDelivery" id="requestedDelivery"><option value="">Sin definir</option><option value="cliente_punto">Cliente en punto</option><option value="cliente_recoge">Cliente recoge</option><option value="despacho_local">Despacho local</option><option value="despacho_nacional">Despacho nacional</option></select></label></div><label class="field"><span>Observación comercial</span><textarea class="textarea" name="description" id="description" placeholder="Aclaraciones del asesor, condición especial o instrucción inicial."></textarea></label><button class="btn btn-primary" type="submit">Crear y enviar a recepción</button></form></section>');
   qs("#caseForm").onsubmit=function(e){e.preventDefault();createCase(new FormData(e.target));};
-  qs("#pdfInput").onchange=function(e){readPdf(e.target.files[0]);};
+}
+
+function readPdfFile(file){
+  if(!file)return Promise.reject(new Error("No se seleccionó PDF."));
+  if(!window.pdfjsLib)return Promise.reject(new Error("No cargó el lector PDF."));
+  return new Promise(function(resolve,reject){
+    var reader=new FileReader();
+    reader.onload=function(){
+      var arr=new Uint8Array(reader.result);
+      pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      pdfjsLib.getDocument({data:arr}).promise.then(function(pdf){
+        var pages=[];var chain=Promise.resolve();
+        for(var i=1;i<=pdf.numPages;i++){(function(pageNo){chain=chain.then(function(){return pdf.getPage(pageNo);}).then(function(page){return page.getTextContent();}).then(function(tc){
+          var lastY=null, line=[];var lines=[];
+          tc.items.forEach(function(it){var y=it.transform&&it.transform.length?Math.round(it.transform[5]):0;if(lastY!==null&&Math.abs(y-lastY)>2){lines.push(line.join(" "));line=[];}line.push(it.str);lastY=y;});
+          if(line.length)lines.push(line.join(" "));
+          pages.push(lines.join("\n"));
+        });})(i);}
+        return chain.then(function(){resolve(pages.join("\n"));});
+      }).catch(reject);
+    };
+    reader.onerror=function(){reject(new Error("No fue posible leer el archivo."));};
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function fileToBase64Payload(file){
+  return new Promise(function(resolve,reject){
+    var reader=new FileReader();
+    reader.onload=function(){var data=String(reader.result||"");resolve(data.split(",")[1]||data);};
+    reader.onerror=function(){reject(new Error("No fue posible preparar el archivo para Drive."));};
+    reader.readAsDataURL(file);
+  });
+}
+function uploadReceptionPdfToDrive(file,c){
+  return uploadFileToDrive(file,c,"Recepción de pedidos",file&&file.name?file.name:"pedido.pdf");
+}
+function uploadFileToDrive(file,c,processName,fileName){
+  var url=(window.appSettings&&window.appSettings.driveUploadUrl)||"";
+  if(!url)return Promise.resolve(null);
+  return fileToBase64Payload(file).then(function(base64){
+    return fetch(url,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({
+      base64:base64,
+      mimeType:file.type||"application/octet-stream",
+      fileName:fileName||file.name||("evidencia_"+Date.now()),
+      caseId:c.id,
+      orderNumber:c.reference,
+      processName:processName||processTitle(c.currentProcess),
+      ownerName:state.user?state.user.name:"Responsable",
+      ownerRole:state.user?state.user.role:"",
+      processKey:c.currentProcess
+    })});
+  }).then(function(res){return res.json();});
 }
 
 function readPdf(file){
@@ -337,37 +402,66 @@ function readPdf(file){
 }
 
 function extractPedido(text){
-  text=String(text||"").replace(/\s+/g," ");
-  function m(rx){var r=text.match(rx);return r?r[1].trim():"";}
+  var raw=String(text||"");
+  var flat=raw.replace(/\s+/g," ");
+  function m(rx){var r=flat.match(rx);return r?r[1].trim():"";}
+  var orderNumber=m(/No\.\s*([A-Z0-9\-]+)/i) || m(/\b((?:PVC|PVN|PVR|PVE|PED)[\- ]?\d{3,}[A-Z0-9\-]*)\b/i) || m(/(?:PEDIDO|ORDEN)\s*(?:N[oº°.]*)?\s*[:#-]?\s*([A-Z0-9\-]{4,})/i);
+  var orderKind=(orderNumber.match(/^(PVC|PVN|PVR|PVE)/i)||[])[1] || m(/\b(PVC|PVN|PVR|PVE)\b/i) || "VENTAS";
   return {
-    orderNumber:m(/No\.\s*([A-Z0-9\-]+)/i),
-    client:m(/Cliente\s+(.+?)\s+Dirección/i) || m(/Señores\s+(.+?)\s+NIT/i),
-    paymentCondition:m(/Forma de Pago:\s*([A-Z0-9ÁÉÍÓÚÑ\s\-]+)/i),
-    salesAdvisor:m(/Vendedor:\s*([A-ZÁÉÍÓÚÑ\s]+)/i),
-    raw:text.slice(0,3000)
+    orderNumber:orderNumber,
+    orderKind:orderKind.toUpperCase(),
+    client:m(/Cliente\s*:?\s*(.+?)\s+(?:Direcci[oó]n|NIT|Tel[eé]fono|Ciudad)/i) || m(/Señores\s+(.+?)\s+NIT/i),
+    paymentCondition:m(/Forma de Pago:?\s*([A-Z0-9ÁÉÍÓÚÑ\s\-]+)/i),
+    salesAdvisor:m(/Vendedor:?\s*([A-ZÁÉÍÓÚÑ\s]+)/i),
+    items:extractPedidoItems(raw),
+    raw:flat.slice(0,5000)
   };
 }
 
+function extractPedidoItems(text){
+  var raw=String(text||"").replace(/\r/g,"\n");
+  var lines=raw.split(/\n+/).map(function(x){return x.replace(/\s+/g," ").trim();}).filter(Boolean);
+  if(lines.length<3)lines=raw.replace(/\s+/g," ").split(/(?=\b[A-Z0-9][A-Z0-9._\-\/]{2,}\s+.{5,}?\s+[0-9][0-9.,]*\s*(?:M|MT|MTS|METRO|METROS|UND|UN|KG|ROLLO|ROLLOS|CJ|CAJA)\b)/i);
+  var items=[], seen={};
+  lines.forEach(function(line){
+    if(/(valor\s*unit|valor\s*parcial|subtotal|iva|total\s)/i.test(line))return;
+    var rx=/^\s*([A-Z0-9][A-Z0-9._\-\/]{2,})\s+(.{4,120}?)\s+([0-9][0-9.,]*)\s*(MTS?|MT|M|METROS?|UND|UN|KG|ROLLOS?|CJ|CAJA)\b/i;
+    var r=line.match(rx);
+    if(!r){
+      rx=/\b([A-Z0-9][A-Z0-9._\-\/]{2,})\b\s+(.{4,120}?)\b(CANT\.?|CANTIDAD)?\s*([0-9][0-9.,]*)\s*(MTS?|MT|M|METROS?|UND|UN|KG|ROLLOS?|CJ|CAJA)\b/i;
+      r=line.match(rx);if(r)r=[r[0],r[1],r[2],r[4],r[5]];
+    }
+    if(!r)return;
+    var ref=r[1].trim(), desc=r[2].trim(), qty=r[3].trim(), unit=r[4].toUpperCase();
+    var key=ref+"|"+qty+"|"+unit;if(seen[key])return;seen[key]=1;
+    items.push({id:uid("LIN"),referencia:ref,descripcion:desc,cantidad:qty,unidad:unit,requiereCorte:/^(M|MT|MTS|METRO|METROS)$/i.test(unit),estado:/^(M|MT|MTS|METRO|METROS)$/i.test(unit)?"PENDIENTE_CORTE":"ALISTAMIENTO"});
+  });
+  return items.slice(0,80);
+}
+
 function createCase(fd){
-  var created=now(), p="recepcion_pedidos", def=processes[p], priority=fd.get("priorityMode")==="gerencia", x=state.pdfExtraction||{};
-  var c={id:uid("PED"),type:"pedido_venta",procedureCode:def.code,currentProcess:p,status:priority?"pendiente_gerencia":"asignado",priority:priority?"Pendiente gerencia":"Normal",reference:fd.get("reference")||x.orderNumber,client:fd.get("client")||x.client,description:fd.get("description"),requestedDelivery:fd.get("requestedDelivery"),deliveryType:"",paymentCondition:fd.get("paymentCondition")||x.paymentCondition,salesAdvisor:x.salesAdvisor||state.user.name,assignedRole:priority?"gerencia":"coordinador_logistico",assignedName:priority?"Gerencia":"Coordinador logístico / Líder logístico",assignedTo:"",createdAt:created,createdBy:state.user.uid,createdByName:state.user.name,updatedAt:created,activeStartedAt:null,waitStartedAt:priority?created:null,deadStartedAt:priority?null:created,totalRequirements:0,checklist:{},openRequirement:null,priorityApproval:priority?{status:"pendiente",reason:fd.get("priorityReason")||"Solicitud prioritaria",requestedAt:created,requestedByName:state.user.name}:null,evidence:[],pdfExtraction:x,processStats:{}};
+  var created=now(), p="recepcion_pedidos", def=processes[p], priority=fd.get("priorityMode")==="gerencia";
+  var c={id:uid("PED"),type:"pedido_venta",procedureCode:def.code,currentProcess:p,status:priority?"pendiente_gerencia":"asignado",priority:priority?"Pendiente gerencia":"Normal",reference:fd.get("reference"),orderKind:fd.get("orderKind")||"VENTAS",client:fd.get("client"),description:fd.get("description"),requestedDelivery:fd.get("requestedDelivery"),deliveryType:"",paymentCondition:"",salesAdvisor:state.user.name,assignedRole:priority?"gerencia":"coordinador_logistico",assignedName:priority?"Gerencia":"Coordinador logístico / Líder logístico",assignedTo:"",createdAt:created,createdBy:state.user.uid,createdByName:state.user.name,updatedAt:created,activeStartedAt:null,waitStartedAt:priority?created:null,deadStartedAt:priority?null:created,totalRequirements:0,checklist:{},openRequirement:null,priorityApproval:priority?{status:"pendiente",reason:fd.get("priorityReason")||"Solicitud prioritaria",requestedAt:created,requestedByName:state.user.name}:null,evidence:[],pdfExtraction:null,orderItems:[],cutRequests:[],hasCuts:false,documentFlow:{salesRegisteredAt:created,salesRegisteredBy:state.user.name,receptionPdfLoadedAt:null},processStats:{}};
   procStats(c,p).startedAt=created;
   if(priority){procStats(c,p).waitMs=0;} else {procStats(c,p).deadMs=0;}
-  def.checklist.forEach(function(item){c.checklist[item]=initialCheckFromPdf(item,x);});
-  persistCase(c,{type:"CASE_CREATED",detail:priority?"Pedido enviado a gerencia":"Pedido creado por ventas y enviado a logística"}).then(function(){state.pdfExtraction=null;state.route="dashboard";render();}).catch(function(e){showError(e.message||e);});
+  def.checklist.forEach(function(item){c.checklist[item]=item==="Pedido registrado por ventas"?"ok":"pending";});
+  persistCase(c,{type:"CASE_CREATED",detail:priority?"Pedido registrado por ventas y enviado a gerencia":"Pedido registrado por ventas y enviado a recepción"}).then(function(){state.route="dashboard";render();}).catch(function(e){showError(e.message||e);});
 }
 
 function initialCheckFromPdf(item,x){if(!x)return"pending";if(item==="Contenido del pedido completo")return x.orderNumber&&x.client?"ok":"pending";if(item==="Cliente identificado")return x.client?"ok":"pending";if(item==="Forma de pago definida")return x.paymentCondition?"ok":"pending";return"pending";}
 
 function renderDetail(id){
   var c=caseById(id);if(!c){renderCases();return;}
+  if(isCutOperator() && !(c.cutRequests||[]).some(function(x){return ["CONFORME","AUTORIZADO","FINALIZADO"].indexOf(x.status)<0;})){renderCutsQueue();return;}
   var def=processes[c.currentProcess]||processes.recepcion_pedidos, actions="";
   if(!c.closedAt){
     if(c.status==="asignado"&&canAccessProcess(state.user.role,c.currentProcess))actions+='<button class="btn btn-primary" data-action="accept" data-id="'+c.id+'">Aceptar</button>';
-    if(c.status==="en_proceso"&&canAccessProcess(state.user.role,c.currentProcess))actions+='<button class="btn btn-gold" data-action="wait" data-id="'+c.id+'">Requerimiento / espera</button>';
+    if(c.status==="en_proceso"&&canAccessProcess(state.user.role,c.currentProcess))actions+='<button class="btn btn-gold" data-action="wait" data-id="'+c.id+'">Requerimiento / espera</button><button class="btn" data-action="evidence" data-id="'+c.id+'">Subir evidencia</button>';
     if(c.status==="espera_ventas"&&state.user.role==="ventas")actions+='<button class="btn btn-primary" data-action="answer" data-id="'+c.id+'">Responder</button>';
     if(c.status==="en_espera"&&state.user.role===c.assignedRole)actions+='<button class="btn btn-primary" data-action="answer" data-id="'+c.id+'">'+(state.user.role==="jefe_logistica"?"Aprobar / resolver":"Resolver")+'</button>';
     if(isJefeLogistica()&&!c.closedAt)actions+='<button class="btn btn-gold" data-action="supervise" data-id="'+c.id+'">Observación jefe logística</button>';
+    if(c.status==="en_proceso"&&c.currentProcess==="recepcion_pedidos"&&canAccessProcess(state.user.role,c.currentProcess))actions+='<button class="btn btn-primary" data-action="receptionPdf" data-id="'+c.id+'">Cargar PDF recepción</button>';
+    if(c.status==="en_proceso"&&c.currentProcess==="alistamiento"&&canAccessProcess(state.user.role,c.currentProcess))actions+='<button class="btn btn-primary" data-action="planCuts" data-id="'+c.id+'">Definir cortes</button><button class="btn btn-gold" data-action="syncCuts" data-id="'+c.id+'">Sincronizar cortes</button>';
     if(c.status==="pendiente_gerencia"&&state.user.role==="gerencia")actions+='<button class="btn btn-success" data-action="approve" data-id="'+c.id+'">Aprobar</button><button class="btn btn-danger" data-action="reject" data-id="'+c.id+'">Rechazar</button>';
     if(c.status==="en_proceso"&&canAccessProcess(state.user.role,c.currentProcess)){
       if(c.currentProcess==="facturacion")actions+='<button class="btn btn-primary" data-action="delivery" data-id="'+c.id+'">Definir facturación / entrega</button>';
@@ -377,7 +471,7 @@ function renderDetail(id){
     if(c.status==="en_proceso"&&canAccessProcess(state.user.role,c.currentProcess)&&canCloseHere(c))actions+='<button class="btn btn-success" data-action="close" data-id="'+c.id+'">Cerrar caso</button>';
   }
   var checks=def.checklist.map(function(item){var v=c.checklist[item]||"pending";return'<div class="check-row"><div class="check-title">'+esc(item)+'</div><div class="segment" data-check="'+esc(item)+'" data-id="'+c.id+'">'+["ok|Conforme|ok","bad|No conforme|bad","na|N/A|na","pending|Pendiente|pending"].map(function(x){var a=x.split("|");return'<button class="'+(v===a[0]?'active '+a[2]:'')+'" data-action="check" data-value="'+a[0]+'">'+a[1]+'</button>';}).join("")+'</div></div>';}).join("");
-  layout(header(c.reference||c.id,processTitle(c.currentProcess)+" · "+(c.client||"Sin cliente"),'<button class="btn" data-route="cases">Volver</button>'+actions)+'<section class="grid grid-4"><article class="card kpi"><span>Lead Time</span><strong style="font-size:1.55rem">'+fmt(totalMs(c))+'</strong><small>Desde ventas</small></article><article class="card kpi"><span>VA</span><strong style="font-size:1.55rem">'+fmt(activeMs(c))+'</strong><small>Tiempo activo</small></article><article class="card kpi"><span>NVA</span><strong style="font-size:1.55rem">'+fmt(waitMs(c)+deadMs(c))+'</strong><small>Espera + muerto</small></article><article class="card kpi"><span>Avance</span><strong>'+progress(c)+'%</strong><small>Checklist</small></article></section>'+(c.openRequirement?'<section class="notice" style="margin-top:16px"><strong>Requerimiento activo:</strong> '+esc(c.openRequirement.reason)+' · '+esc(c.openRequirement.detail||"")+'</section>':"")+'<section class="grid grid-2" style="margin-top:16px"><article class="card"><h3>Checklist</h3><div class="checklist">'+checks+'</div></article><article class="card"><h3>Datos del caso</h3>'+caseInfo(c)+'<h3 style="margin-top:18px">Secuencia y tiempos</h3>'+timeline(c)+'<h3 style="margin-top:18px">Eventos</h3>'+eventList(c.id)+'</article></section>');
+  layout(header(c.reference||c.id,processTitle(c.currentProcess)+" · "+(c.client||"Sin cliente"),'<button class="btn" data-route="cases">Volver</button>'+actions)+'<section class="grid grid-4"><article class="card kpi"><span>Lead Time</span><strong style="font-size:1.55rem">'+fmt(totalMs(c))+'</strong><small>Desde ventas</small></article><article class="card kpi"><span>VA</span><strong style="font-size:1.55rem">'+fmt(activeMs(c))+'</strong><small>Tiempo activo</small></article><article class="card kpi"><span>NVA</span><strong style="font-size:1.55rem">'+fmt(waitMs(c)+deadMs(c))+'</strong><small>Espera + muerto</small></article><article class="card kpi"><span>Avance</span><strong>'+progress(c)+'%</strong><small>Checklist</small></article></section>'+(c.openRequirement?'<section class="notice" style="margin-top:16px"><strong>Requerimiento activo:</strong> '+esc(c.openRequirement.reason)+' · '+esc(c.openRequirement.detail||"")+'</section>':"")+orderItemsPanel(c)+cutsPanel(c)+evidencePanel(c)+'<section class="grid grid-2" style="margin-top:16px"><article class="card"><h3>Checklist</h3><div class="checklist">'+checks+'</div></article><article class="card"><h3>Datos del caso</h3>'+caseInfo(c)+'<h3 style="margin-top:18px">Secuencia y tiempos</h3>'+timeline(c)+'<h3 style="margin-top:18px">Eventos</h3>'+eventList(c.id)+'</article></section>');
 }
 
 function nextActionButtons(c){
@@ -385,13 +479,104 @@ function nextActionButtons(c){
   return next.filter(function(n){return n!=="cierre_caso";}).map(function(n){return'<button class="btn btn-primary" data-action="transfer" data-next="'+n+'" data-id="'+c.id+'">Enviar a '+esc(processTitle(n))+'</button>';}).join("");
 }
 function canCloseHere(c){var next=(processes[c.currentProcess]||{}).next||[];return next.indexOf("cierre_caso")>=0;}
-function caseInfo(c){var rows=[["Estado",c.status],["Responsable",c.assignedName],["Creado",fmtDate(c.createdAt)],["Cliente",c.client],["Entrega solicitada",processTitle(c.requestedDelivery)],["Entrega definida",processTitle(c.deliveryType)],["Forma pago",c.paymentCondition],["Prioridad",c.priority],["Requerimientos",c.totalRequirements]];return rows.map(function(r){return r[1]?'<div class="case-meta" style="justify-content:space-between;border-bottom:1px solid #eef2f7;padding:8px 0"><span>'+esc(r[0])+'</span><strong>'+esc(r[1])+'</strong></div>':"";}).join("");}
+function caseInfo(c){var cuts=(c.cutRequests||[]), done=cuts.filter(function(x){return x.status==="CONFORME"||x.status==="AUTORIZADO"||x.status==="FINALIZADO";}).length;var rows=[["Estado",c.status],["Responsable",c.assignedName],["Creado",fmtDate(c.createdAt)],["Tipo pedido",c.orderKind],["Cliente",c.client],["PDF recepción",c.documentFlow&&c.documentFlow.receptionPdfLoadedAt?fmtDate(c.documentFlow.receptionPdfLoadedAt):"Pendiente"],["PDF Drive",c.documentFlow&&c.documentFlow.receptionPdfDriveUrl?"Guardado":"Sin URL"],["Líneas detectadas",(c.orderItems||[]).length],["Cortes",cuts.length?(done+"/"+cuts.length):"Sin cortes"],["Entrega solicitada",processTitle(c.requestedDelivery)],["Entrega definida",processTitle(c.deliveryType)],["Forma pago",c.paymentCondition],["Prioridad",c.priority],["Requerimientos",c.totalRequirements]];return rows.map(function(r){return r[1]!==undefined&&r[1]!==""?'<div class="case-meta" style="justify-content:space-between;border-bottom:1px solid #eef2f7;padding:8px 0"><span>'+esc(r[0])+'</span><strong>'+esc(r[1])+'</strong></div>':"";}).join("");}
 function timeline(c){
   return '<div class="timeline">'+FLOW.filter(function(p){return c.processStats&&c.processStats[p];}).map(function(p){var s=c.processStats[p];return'<div class="timeline-row"><b>'+esc(processes[p].icon+' · '+processTitle(p))+'</b><span>VA '+fmt(s.activeMs||0)+' · Espera '+fmt(s.waitMs||0)+' · Muerto '+fmt(s.deadMs||0)+'</span><strong>'+esc(s.completedAt?"Cerrado":"Activo")+'</strong></div>';}).join("")+'</div>';
 }
 function eventList(id){var list=state.events.filter(function(e){return e.caseId===id;}).slice(0,12);if(!list.length)return'<div class="empty">Sin eventos.</div>';return list.map(function(e){return'<div style="border-bottom:1px solid #eef2f7;padding:8px 0"><strong>'+esc(e.type)+'</strong><br><span style="color:#64748b">'+esc(e.detail||e.reason||"")+' · '+fmtDate(e.timestamp)+'</span></div>';}).join("");}
 
-function renderRequirements(){var list=state.cases.filter(function(c){return c.status==="espera_ventas"||c.status==="en_espera"||c.openRequirement;});layout(header("Requerimientos","Trazabilidad de tiempos de resolución.")+caseList(list));}
+
+function orderItemsPanel(c){
+  var items=c.orderItems||[];
+  if(!items.length)return c.currentProcess==="recepcion_pedidos"?'<section class="card" style="margin-top:16px"><h3>Documento del pedido</h3><div class="empty">Pendiente cargar PDF en Recepción de pedidos.</div></section>':"";
+  return '<section class="card" style="margin-top:16px"><h3>Líneas detectadas del pedido</h3><div class="table-wrap"><table><thead><tr><th>Referencia</th><th>Descripción</th><th>Cantidad</th><th>Unidad</th><th>Destino</th></tr></thead><tbody>'+items.map(function(it){return'<tr><td>'+esc(it.referencia)+'</td><td>'+esc(it.descripcion)+'</td><td>'+esc(it.cantidad)+'</td><td>'+esc(it.unidad)+'</td><td>'+esc(it.requiereCorte?"Corte / validar":"Alistamiento")+'</td></tr>';}).join("")+'</tbody></table></div></section>';
+}
+function cutStatusChip(st){var map={PENDIENTE_CORTE:["Pendiente corte","warning"],EN_CORTE:["En corte","primary"],CONFORME:["Conforme","success"],AUTORIZADO:["Autorizado","success"],FINALIZADO:["Finalizado","success"],PENDIENTE_GERENCIA:["Pendiente gerencia","warning"],PENDIENTE_LIDER:["Pendiente líder","warning"],RECHAZADO:["Rechazado","danger"],NO_CONFORME:["No conforme","danger"],REVISAR:["Revisar","warning"]};var m=map[st]||[st||"Pendiente","info"];return '<span class="chip '+m[1]+'">'+esc(m[0])+'</span>';}
+function cutsPanel(c){
+  var cuts=c.cutRequests||[];if(!cuts.length)return "";
+  return '<section class="card" style="margin-top:16px"><h3>Cortes vinculados al pedido</h3><div class="table-wrap"><table><thead><tr><th>Corte</th><th>Referencia</th><th>Metros</th><th>Disponible</th><th>Estado</th><th>Tiempo</th><th>Acción</th></tr></thead><tbody>'+cuts.map(function(cut){var canLaunch=state.user&&(state.user.role==="auxiliar_corte"||state.user.role==="admin");return'<tr><td>'+esc(cut.code||cut.id)+'</td><td>'+esc(cut.referencia)+'</td><td>'+esc(cut.metrosSolicitados||"")+'</td><td>'+esc(cut.disponibleAntes||"")+'</td><td>'+cutStatusChip(cut.status)+'</td><td>'+esc(cut.durationText||"—")+'</td><td>'+(canLaunch?'<button class="btn btn-small btn-primary" data-action="launchCut" data-id="'+esc(c.id)+'" data-cut="'+esc(cut.id)+'">Abrir corte</button>':"—")+'</td></tr>';}).join("")+'</tbody></table></div></section>';
+}
+function evidencePanel(c){
+  var list=c.evidence||[];
+  if(!list.length)return "";
+  return '<section class="card" style="margin-top:16px"><h3>Evidencias del proceso</h3><div class="table-wrap"><table><thead><tr><th>Proceso</th><th>Archivo</th><th>Descripción</th><th>Responsable</th><th>Fecha</th><th>Drive</th></tr></thead><tbody>'+list.slice().reverse().map(function(e){return '<tr><td>'+esc(e.processName||processTitle(e.process))+'</td><td>'+esc(e.fileName||'')+'</td><td>'+esc(e.detail||'')+'</td><td>'+esc(e.uploadedByName||'')+'</td><td>'+esc(fmtDate(e.uploadedAt))+'</td><td>'+(e.driveUrl?'<a href="'+esc(e.driveUrl)+'" target="_blank" rel="noopener">Abrir</a>':'Sin URL')+'</td></tr>';}).join('')+'</tbody></table></div></section>';
+}
+
+function openReceptionPdf(id){
+  var c=caseById(id);if(!c)return;
+  drawer(modal("Cargar PDF en recepción",'<form class="form" id="recPdfForm"><label class="field"><span>PDF del pedido</span><input class="input" type="file" name="pdf" id="receptionPdfInput" accept="application/pdf" required></label><div class="notice" id="receptionPdfStatus">El documento se lee en recepción. Ventas solo registra el número o nombre del pedido.</div><button class="btn btn-primary" type="submit">Leer y guardar líneas</button></form>'));
+  var parsed=null,fileName="",selectedFile=null;
+  qs("#receptionPdfInput").onchange=function(e){var f=e.target.files&&e.target.files[0];if(!f)return;selectedFile=f;fileName=f.name;qs("#receptionPdfStatus").innerHTML="Leyendo PDF...";readPdfFile(f).then(function(text){parsed=extractPedido(text);qs("#receptionPdfStatus").innerHTML="<strong>PDF leído.</strong><br>Pedido: "+esc(parsed.orderNumber||c.reference||"No detectado")+"<br>Cliente: "+esc(parsed.client||c.client||"No detectado")+"<br>Líneas detectadas: "+(parsed.items||[]).length;}).catch(function(e){qs("#receptionPdfStatus").innerHTML="No fue posible leer el PDF. "+esc(e.message||e);});};
+  qs("#recPdfForm").onsubmit=function(e){e.preventDefault();if(!parsed){alert("Primero seleccione y lea el PDF.");return;}c.pdfExtraction=parsed;c.orderItems=parsed.items||[];if(parsed.orderNumber)c.reference=parsed.orderNumber;if(parsed.orderKind)c.orderKind=parsed.orderKind;if(parsed.client)c.client=parsed.client;if(parsed.paymentCondition)c.paymentCondition=parsed.paymentCondition;c.documentFlow=c.documentFlow||{};c.documentFlow.receptionPdfLoadedAt=now();c.documentFlow.receptionPdfLoadedBy=state.user.name;c.documentFlow.receptionPdfFileName=fileName;c.checklist=c.checklist||{};["PDF del pedido cargado en recepción","Documento legible y completo","Número de pedido identificado","Cliente identificado","Referencias del pedido identificadas","Cantidades y unidades de medida identificadas"].forEach(function(k){if(c.checklist[k]!==undefined)c.checklist[k]="ok";});uploadReceptionPdfToDrive(selectedFile,c).then(function(up){if(up&&up.ok){c.documentFlow.receptionPdfDriveUrl=up.url;c.documentFlow.receptionPdfDriveId=up.fileId;c.documentFlow.receptionPdfDriveFolder=up.folder;}return persistCase(c,{type:"RECEPTION_PDF_LOADED",detail:"PDF de recepción cargado. Líneas detectadas: "+c.orderItems.length});}).then(function(){closeDrawer();renderDetail(id);}).catch(function(e){showError(e.message||e);});};
+}
+function openCutsPlanner(id){
+  var c=caseById(id);if(!c)return;var items=c.orderItems||[];
+  var rows=items.length?items.map(function(it,i){var checked=it.requiereCorte?'checked':'';return'<tr><td><input type="checkbox" name="cut_'+i+'" '+checked+'></td><td>'+esc(it.referencia)+'</td><td>'+esc(it.descripcion)+'</td><td><input class="input" name="meters_'+i+'" value="'+esc(it.cantidad||"")+'"></td><td><input class="input" name="available_'+i+'" placeholder="Metros disponibles"></td></tr>';}).join(""):'<tr><td colspan="5">No hay líneas del PDF. Puede crear un corte manual.</td></tr>';
+  drawer(modal("Definir cortes del pedido",'<form class="form" id="cutsPlanForm"><div class="notice">Seleccione únicamente las líneas que deben pasar a la app de corte. El alistamiento puede continuar en paralelo mientras los cortes se ejecutan y guardan sus tiempos.</div><div class="table-wrap"><table><thead><tr><th>Corte</th><th>Referencia</th><th>Descripción</th><th>Metros</th><th>Disponible</th></tr></thead><tbody>'+rows+'</tbody></table></div><fieldset><legend>Corte manual opcional</legend><div class="grid grid-3"><label class="field"><span>Referencia</span><input class="input" name="manualRef"></label><label class="field"><span>Metros</span><input class="input" name="manualMeters"></label><label class="field"><span>Disponible</span><input class="input" name="manualAvailable"></label></div><label class="field"><span>Observación</span><textarea class="textarea" name="manualObs"></textarea></label></fieldset><button class="btn btn-primary" type="submit">Crear solicitudes de corte</button></form>'));
+  qs("#cutsPlanForm").onsubmit=function(e){e.preventDefault();var fd=new FormData(e.target);c.cutRequests=c.cutRequests||[];var added=0;items.forEach(function(it,i){if(!fd.get("cut_"+i))return;var meters=fd.get("meters_"+i)||it.cantidad||"";var ref=it.referencia||"";var exists=c.cutRequests.some(function(x){return x.sourceLineId===it.id&&String(x.metrosSolicitados)===String(meters);});if(exists)return;var idc=uid("CUT");c.cutRequests.push({id:idc,code:"CT-"+(c.cutRequests.length+1),sourceLineId:it.id,caseId:c.id,pedido:c.reference,tipoPedido:c.orderKind||"VENTAS",referencia:ref,descripcion:it.descripcion||"",metrosSolicitados:meters,disponibleAntes:fd.get("available_"+i)||"",status:"PENDIENTE_CORTE",createdAt:now(),createdByName:state.user.name});added++;});
+    if(fd.get("manualRef")||fd.get("manualMeters")){var idm=uid("CUT");c.cutRequests.push({id:idm,code:"CT-"+(c.cutRequests.length+1),caseId:c.id,pedido:c.reference,tipoPedido:c.orderKind||"VENTAS",referencia:fd.get("manualRef")||"Corte manual",descripcion:fd.get("manualObs")||"",metrosSolicitados:fd.get("manualMeters")||"",disponibleAntes:fd.get("manualAvailable")||"",status:"PENDIENTE_CORTE",createdAt:now(),createdByName:state.user.name});added++;}
+    c.hasCuts=(c.cutRequests||[]).length>0;var st=procStats(c,"corte_cable");st.startedAt=st.startedAt||now();c.checklist=c.checklist||{};if(c.checklist["Líneas que requieren corte definidas"]!==undefined)c.checklist["Líneas que requieren corte definidas"]="ok";if(c.checklist["Cortes enviados a app de corte si aplica"]!==undefined&&c.cutRequests.length)c.checklist["Cortes enviados a app de corte si aplica"]="ok";
+    persistCase(c,{type:"CUT_REQUESTS_CREATED",detail:"Solicitudes de corte creadas: "+added}).then(function(){closeDrawer();renderDetail(id);}).catch(function(e){showError(e.message||e);});};
+}
+function cutPayload(c,cut){return {caseId:c.id,cutId:cut.id,pedido:c.reference||cut.pedido||"",tipoPedido:(String(c.orderKind||cut.tipoPedido||"VENTAS").toUpperCase()==="ALUMBRADO"?"ALUMBRADO":"VENTAS"),referencia:cut.referencia||"",descripcion:cut.descripcion||"",metrosSolicitados:cut.metrosSolicitados||"",disponibleAntes:cut.disponibleAntes||"",cliente:c.client||"",source:"trazabilidadlog"};}
+function storeCutUserSession(){
+  if(!state.user)return;
+  localStorage.setItem("ei_integrated_cut_user",JSON.stringify({uid:state.user.uid,email:state.user.email,name:state.user.name,mainRole:state.user.role,cutRole:"OPERARIO",source:"trazabilidadlog",savedAt:now()}));
+}
+function launchCut(id,cutId){var c=caseById(id);if(!c)return;var cut=(c.cutRequests||[]).filter(function(x){return x.id===cutId;})[0];if(!cut)return;cut.status=cut.status==="PENDIENTE_CORTE"?"EN_CORTE":cut.status;cut.takenByUid=state.user.uid;cut.takenByName=state.user.name;cut.takenAt=cut.takenAt||now();var payload=cutPayload(c,cut);localStorage.setItem("ei_cut_payload_"+cut.id,JSON.stringify(payload));localStorage.setItem("ei_last_cut_payload",JSON.stringify(payload));storeCutUserSession();persistCase(c,{type:"CUT_OPENED",detail:"Corte abierto: "+(cut.code||cut.id)+" · "+(cut.referencia||"")}).then(function(){var url=INTEGRATED_CUTS_URL+"?integrated=1&cutId="+encodeURIComponent(cut.id)+"&caseId="+encodeURIComponent(c.id);window.open(url,"_blank");renderDetail(id);}).catch(function(e){showError(e.message||e);});}
+function durationToMs(v){var s=String(v||"");var m=s.match(/(\d+):(\d+):(\d+)/);if(m)return ((+m[1])*3600+(+m[2])*60+(+m[3]))*1000;var n=Number(s);return Number.isFinite(n)?n:0;}
+function refreshCutStats(c){var cuts=c.cutRequests||[], st=procStats(c,"corte_cable"), total=0, complete=0;cuts.forEach(function(x){total+=durationToMs(x.durationText||x.durationMs);if(["CONFORME","AUTORIZADO","FINALIZADO"].indexOf(x.status)>=0)complete++;});st.activeMs=total;if(cuts.length&&complete===cuts.length){st.completedAt=st.completedAt||now();if(c.checklist&&c.checklist["Cortes terminados o en seguimiento"]!==undefined)c.checklist["Cortes terminados o en seguimiento"]="ok";}}
+function normalizeCutRequirementReason(reason){
+  var map={CABLE_NO_DISPONIBLE_TOTAL:"Cable no disponible en su totalidad para el corte",CHIPA_MAYOR_VENDER_TODA:"Chipa con cantidad mayor que se puede vender toda",MAL_REGISTRO_PEDIDO:"Mal registro del pedido",OTROS:"Otros"};
+  return map[reason]||reason||"Requerimiento generado desde corte";
+}
+function applyCutRequirementPayload(payload){
+  if(!payload||!payload.caseId)return Promise.resolve(false);
+  var c=caseById(payload.caseId);if(!c)return Promise.resolve(false);
+  var reason=normalizeCutRequirementReason(payload.reasonCode||payload.reason);
+  var target="ventas";
+  c.requirements=c.requirements||[];
+  c.requirements.push({id:uid("REQ"),source:"corte_cable",cutId:payload.cutId||"",reason:reason,reasonCode:payload.reasonCode||"",detail:payload.detail||"",targetRole:target,sentAt:now(),sentByName:payload.responsable||"Auxiliar de corte",status:"pendiente"});
+  c.openRequirement={reason:reason,detail:payload.detail||"",targetRole:target,sentAt:now(),sentBy:payload.responsableUid||"",sentByName:payload.responsable||"Auxiliar de corte",returnProcess:c.currentProcess,source:"corte_cable",cutId:payload.cutId||""};
+  c.totalRequirements=Number(c.totalRequirements||0)+1;
+  c.status=target==="ventas"?"espera_ventas":"en_espera";
+  c.assignedRole=target;c.assignedName=roleTitle(target);c.waitStartedAt=c.waitStartedAt||now();
+  (c.cutRequests||[]).forEach(function(x){if(x.id===payload.cutId){x.status="REQUERIMIENTO";x.requirementReason=reason;x.requirementDetail=payload.detail||"";}});
+  return persistCase(c,{type:"CUT_REQUIREMENT_TO_SALES",reason:reason,detail:payload.detail||"",targetRole:target}).then(function(){return true;});
+}
+function applyCutBridgePayload(payload){if(!payload||!payload.caseId)return Promise.resolve(false);var c=caseById(payload.caseId);if(!c)return Promise.resolve(false);var cuts=c.cutRequests||[];var cut=cuts.filter(function(x){return x.id===payload.cutId;})[0];if(!cut){cut={id:payload.cutId||uid("CUT"),code:"CT-"+(cuts.length+1),caseId:c.id,pedido:c.reference,referencia:payload.referencia||payload.REFERENCIA_CABLE,metrosSolicitados:payload.metrosSolicitados||payload.METROS_SOLICITADOS,status:"REGISTRADO",createdAt:now()};cuts.push(cut);c.cutRequests=cuts;}cut.status=payload.estadoCorte||payload.ESTADO_CORTE||"FINALIZADO";cut.recordId=payload.recordId||payload.id||"";cut.consecutivo=payload.consecutivo||payload.CONSECUTIVO||"";cut.durationText=payload.duracion||payload.DURACION_CORTE||"";cut.completedAt=now();cut.responsable=payload.responsable||payload.RESPONSABLE_CORTE||"";cut.driveInicialUrl=payload.fotoInicialUrl||payload.FOTO_INICIAL_DRIVE_URL||"";cut.driveFinalUrl=payload.fotoFinalUrl||payload.FOTO_FINAL_DRIVE_URL||"";cut.requerimiento=payload.requerimiento||cut.requerimiento||"";refreshCutStats(c);return persistCase(c,{type:"CUT_SAVED",detail:"Corte guardado: "+(cut.consecutivo||cut.code||cut.id)+" · "+(cut.status||"")}).then(function(){return true;});}
+function syncCutBridge(id){
+  var c=caseById(id);if(!c)return;
+  var raw=localStorage.getItem("ei_trazabilidad_corte_bridge_events");var list=[];
+  try{list=JSON.parse(raw||"[]")||[];}catch(e){}
+  var pending=list.filter(function(x){return x&&x.caseId===id&&!x.synced;});
+  var chain=Promise.resolve();
+  pending.forEach(function(ev){
+    chain=chain.then(function(){
+      var fn=ev.type==="EI_CUT_REQUIREMENT"?applyCutRequirementPayload:applyCutBridgePayload;
+      return fn(ev).then(function(){ev.synced=true;});
+    });
+  });
+  chain.then(function(){localStorage.setItem("ei_trazabilidad_corte_bridge_events",JSON.stringify(list.slice(-100)));renderDetail(id);}).catch(function(e){showError(e.message||e);});
+}
+function renderCutsQueue(){var list=state.cases.filter(function(c){return (c.cutRequests||[]).some(function(x){return ["CONFORME","AUTORIZADO","FINALIZADO"].indexOf(x.status)<0;});});var rows=[];list.forEach(function(c){(c.cutRequests||[]).forEach(function(cut){if(["CONFORME","AUTORIZADO","FINALIZADO"].indexOf(cut.status)>=0)return;rows.push({c:c,cut:cut});});});layout(header("Cortes de cable","Solicitudes generadas desde alistamiento y conectadas con la app de corte.")+'<section class="card"><div class="table-wrap"><table><thead><tr><th>Pedido</th><th>Cliente</th><th>Corte</th><th>Referencia</th><th>Metros</th><th>Estado</th><th>Acción</th></tr></thead><tbody>'+(rows.length?rows.map(function(r){return'<tr><td>'+esc(r.c.reference)+'</td><td>'+esc(r.c.client||"")+'</td><td>'+esc(r.cut.code||r.cut.id)+'</td><td>'+esc(r.cut.referencia)+'</td><td>'+esc(r.cut.metrosSolicitados)+'</td><td>'+cutStatusChip(r.cut.status)+'</td><td><button class="btn btn-small btn-primary" data-action="launchCut" data-id="'+esc(r.c.id)+'" data-cut="'+esc(r.cut.id)+'">Abrir corte</button></td></tr>';}).join(""):'<tr><td colspan="7">No hay cortes pendientes.</td></tr>')+'</tbody></table></div></section>');}
+
+function isRequirementVisibleForUser(c){
+  if(!state.user)return false;
+  if(canSeeAll())return c.status==="espera_ventas"||c.status==="en_espera"||c.openRequirement||(c.requirements&&c.requirements.length);
+  var r=state.user.role;
+  if(c.openRequirement && c.openRequirement.targetRole===r)return true;
+  if(c.assignedRole===r && (c.status==="espera_ventas"||c.status==="en_espera"))return true;
+  return (c.requirements||[]).some(function(req){return req.targetRole===r && req.status!=="resuelto";});
+}
+function visibleRequirements(){
+  return state.cases.filter(isRequirementVisibleForUser).sort(function(a,b){return new Date(b.updatedAt||b.createdAt)-new Date(a.updatedAt||a.createdAt);});
+}
+function renderRequirements(){
+  var title=state.user&&state.user.role==="ventas"?"Requerimientos de Ventas":"Requerimientos";
+  var subtitle=state.user&&state.user.role==="ventas"?"Solicitudes enviadas a Ventas desde corte, alistamiento u otros procesos para corregir o aclarar el pedido.":"Trazabilidad de tiempos de resolución según el módulo responsable.";
+  layout(header(title,subtitle)+caseList(visibleRequirements()));
+}
 function renderApprovals(){
   var list;
   var title="Aprobaciones";
@@ -422,7 +607,8 @@ function renderUsers(){
 function uniqueRoles(){var m={};state.users.forEach(function(u){m[u.role]=1;});return Object.keys(m).length;}
 
 function renderIndicators(){
-  var data=canSeeAll()?state.cases:visibleCases(), total=data.length||1, open=data.filter(function(c){return !c.closedAt;}), closed=data.filter(function(c){return c.closedAt;});
+  if(!canSeeKpis()){layout(header("Indicadores","Acceso restringido.")+'<div class="empty">Los KPIs consolidados solo están disponibles para jefe logístico, gerencia y super admin.</div>');return;}
+  var data=state.cases, total=data.length||1, open=data.filter(function(c){return !c.closedAt;}), closed=data.filter(function(c){return c.closedAt;});
   var lead=0,va=0,wait=0,dead=0,rework=0,defects=0,handoffs=0;
   data.forEach(function(c){lead+=totalMs(c);va+=activeMs(c);wait+=waitMs(c);dead+=deadMs(c);if(Number(c.totalRequirements||0)>0)rework++;});
   state.events.forEach(function(e){if(e.type==="CHECK_UPDATED"&&String(e.detail||"").indexOf("bad")>=0)defects++;if(e.type==="TRANSFER_SENT")handoffs++;});
@@ -460,6 +646,21 @@ function assignToProcess(c,next,detail){
   return persistCase(c,{type:"TRANSFER_SENT",detail:detail||("Relevo a "+processTitle(next))});
 }
 
+function openEvidence(id){
+  var c=caseById(id);if(!c)return;
+  drawer(modal("Subir evidencia del proceso",'<form class="form" id="evidenceForm"><div class="notice">Las evidencias se guardan en Drive por proceso, responsable, mes, pedido y caso.</div><label class="field"><span>Archivo o foto</span><input class="input" type="file" name="evidence" id="evidenceInput" accept="image/*,application/pdf" required></label><label class="field"><span>Descripción</span><textarea class="textarea" name="detail" placeholder="Foto de despacho, alistamiento, novedad, entrega o soporte operativo."></textarea></label><button class="btn btn-primary" type="submit">Guardar evidencia</button></form>'));
+  qs("#evidenceForm").onsubmit=function(e){
+    e.preventDefault();
+    var fd=new FormData(e.target), file=qs("#evidenceInput").files&&qs("#evidenceInput").files[0];
+    if(!file){alert("Seleccione un archivo.");return;}
+    uploadFileToDrive(file,c,processTitle(c.currentProcess),file.name).then(function(up){
+      c.evidence=c.evidence||[];
+      c.evidence.push({id:uid("EVD"),process:c.currentProcess,processName:processTitle(c.currentProcess),detail:fd.get("detail")||"",fileName:file.name,mimeType:file.type||"",driveUrl:up&&up.url?up.url:"",driveId:up&&up.fileId?up.fileId:"",folder:up&&up.folder?up.folder:"",uploadedAt:now(),uploadedByName:state.user.name});
+      return persistCase(c,{type:"PROCESS_EVIDENCE_UPLOADED",detail:(fd.get("detail")||file.name)+" · "+processTitle(c.currentProcess)});
+    }).then(function(){closeDrawer();renderDetail(id);}).catch(function(e){showError(e.message||e);});
+  };
+}
+
 function openWait(id){
   var c=caseById(id), def=processes[c.currentProcess];
   drawer(modal("Requerimiento / espera",'<form class="form" id="waitForm"><label class="field"><span>Motivo</span><select class="select" name="reason">'+def.waits.map(function(w){return'<option>'+esc(w)+'</option>';}).join("")+'</select></label><label class="field"><span>Área responsable</span><select class="select" name="role"><option value="ventas">Ventas</option><option value="coordinador_logistico">Coordinador logístico</option><option value="lider_logistico">Líder logístico</option><option value="jefe_logistica">Jefe de logística</option><option value="aux_logistica">Auxiliar logística</option><option value="gerencia">Gerencia</option></select></label><label class="field"><span>Detalle</span><textarea class="textarea" name="detail"></textarea></label><button class="btn btn-primary" type="submit">Enviar requerimiento</button></form>'));
@@ -468,7 +669,27 @@ function openWait(id){
 function openAnswer(id){
   var c=caseById(id);
   drawer(modal("Responder / resolver requerimiento",'<form class="form" id="ansForm"><label class="field"><span>Respuesta</span><textarea class="textarea" name="detail" required></textarea></label><button class="btn btn-primary" type="submit">Resolver y devolver al proceso</button></form>'));
-  qs("#ansForm").onsubmit=function(e){e.preventDefault();var fd=new FormData(e.target);var ret=c.openRequirement?c.openRequirement.returnProcess:c.currentProcess;stopWait(c);c.currentProcess=ret;c.status="en_proceso";c.assignedRole=primaryOwnerRole(ret);c.assignedName=processOwnerTitle(ret);c.activeStartedAt=now();c.openRequirement=null;persistCase(c,{type:"REQUIREMENT_ANSWERED",detail:fd.get("detail")}).then(function(){closeDrawer();renderDetail(id);}).catch(function(e){showError(e.message||e);});};
+  qs("#ansForm").onsubmit=function(e){
+    e.preventDefault();
+    var fd=new FormData(e.target);
+    var req=c.openRequirement||null;
+    var ret=req?req.returnProcess:c.currentProcess;
+    stopWait(c);
+    if(req && c.requirements){
+      c.requirements.forEach(function(r){
+        var sameCut=(req.cutId&&r.cutId===req.cutId)||(!req.cutId&&!r.cutId);
+        if(r.status!=="resuelto" && r.targetRole===req.targetRole && sameCut){
+          r.status="resuelto";
+          r.answeredAt=now();
+          r.answeredBy=state.user.uid;
+          r.answeredByName=state.user.name;
+          r.answer=fd.get("detail");
+        }
+      });
+    }
+    c.currentProcess=ret;c.status="en_proceso";c.assignedRole=primaryOwnerRole(ret);c.assignedName=processOwnerTitle(ret);c.activeStartedAt=now();c.openRequirement=null;
+    persistCase(c,{type:"REQUIREMENT_ANSWERED",detail:fd.get("detail")}).then(function(){closeDrawer();renderDetail(id);}).catch(function(e){showError(e.message||e);});
+  };
 }
 function openDelivery(id){
   var c=caseById(id);
@@ -618,6 +839,7 @@ function bindActions(){
     if(a==="open")renderDetail(id);
     if(a==="accept")accept(id);
     if(a==="wait")openWait(id);
+    if(a==="evidence")openEvidence(id);
     if(a==="answer")openAnswer(id);
     if(a==="delivery")openDelivery(id);
     if(a==="transfer")transfer(id,b.getAttribute("data-next"));
@@ -630,6 +852,10 @@ function bindActions(){
     if(a==="openMobileMenu")openMobileMenu();
     if(a==="closeMobileMenu")closeMobileMenu();
     if(a==="supervise")openSupervisorNote(id);
+    if(a==="receptionPdf")openReceptionPdf(id);
+    if(a==="planCuts")openCutsPlanner(id);
+    if(a==="launchCut")launchCut(id,b.getAttribute("data-cut"));
+    if(a==="syncCuts")syncCutBridge(id);
     if(a==="notifyOn")requestNotifications();
   };});
 }
@@ -637,6 +863,7 @@ function bindActions(){
 function render(){
   if(!state.user){renderLogin();return;}
   startReminderLoop();
+  if(state.route==="corte_cable"){renderCutsQueue();return;}
   if(processes[state.route]){state.filters.process=state.route;renderCases();return;}
   if(state.route==="dashboard")renderDashboard();
   else if(state.route==="cases")renderCases();
@@ -648,6 +875,14 @@ function render(){
   else if(state.route==="admin")renderAdmin();
   else renderDashboard();
 }
+
+window.addEventListener("message",function(event){
+  var data=event.data||{};
+  if(!data)return;
+  if(data.type==="EI_CUT_REQUIREMENT"){applyCutRequirementPayload(data.payload||data).then(function(){render();}).catch(function(e){showError(e.message||e);});return;}
+  if(data.type!=="EI_CUT_SAVED")return;
+  applyCutBridgePayload(data.payload||data).then(function(){render();}).catch(function(e){showError(e.message||e);});
+});
 
 function boot(){
   try{

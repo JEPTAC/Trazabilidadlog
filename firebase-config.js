@@ -11,6 +11,7 @@ window.firebaseConfig = {
 window.appSettings = {
   companyName: "Electroingeniería",
   logoPath: "./assets/logo-electroingenieria.jpeg",
+  driveUploadUrl: "",
   maxGerenciaUsers: 2,
   version: "flujo-secuencial-v6-ios-completo"
 };

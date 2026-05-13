@@ -1,0 +1,72 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function bootstrapAdmin() { return signedIn() && request.auth.token.email == "j.perez@ei.com.co"; }
+    function userPath() { return /databases/$(database)/documents/usuarios/$(request.auth.uid); }
+    function userProfile() { return get(userPath()).data; }
+    function isActive() { return signedIn() && exists(userPath()) && userProfile().activo == true; }
+    function isOperario() { return isActive() && userProfile().rol == "OPERARIO"; }
+    function isGerencia() { return bootstrapAdmin() || (isActive() && userProfile().rol == "GERENCIA"); }
+    function isLider() { return isActive() && userProfile().rol == "LIDER_LOGISTICO"; }
+    function prePath(email) { return /databases/$(database)/documents/usuarios_preaprobados/$(email); }
+    function hasPreapproval() { return signedIn() && exists(prePath(request.auth.token.email)); }
+    function preapproval() { return get(prePath(request.auth.token.email)).data; }
+    function integratedCutWrite() {
+      return request.resource.data.TRAZABILIDAD_SOURCE == "trazabilidadlog"
+        && request.resource.data.TRAZABILIDAD_CASE_ID is string
+        && request.resource.data.TRAZABILIDAD_CASE_ID.size() > 0
+        && request.resource.data.TRAZABILIDAD_CUT_ID is string
+        && request.resource.data.TRAZABILIDAD_CUT_ID.size() > 0;
+    }
+
+    match /usuarios/{uid} {
+      allow read: if signedIn();
+      allow create: if isGerencia()
+        || (
+          signedIn()
+          && request.auth.uid == uid
+          && request.resource.data.correo == request.auth.token.email
+          && request.resource.data.activo == true
+          && (
+            bootstrapAdmin()
+            || (hasPreapproval() && preapproval().activo == true && request.resource.data.rol == preapproval().rol)
+          )
+        );
+      allow update, delete: if isGerencia();
+    }
+
+    match /usuarios_preaprobados/{email} {
+      allow read: if signedIn() && (isGerencia() || resource.data.correo == request.auth.token.email);
+      allow create, update, delete: if isGerencia();
+    }
+
+    match /cortes_cable/{id} {
+      allow read: if isActive();
+      allow create: if (isOperario()
+        && request.resource.data.SOLICITANTE_UID == request.auth.uid
+        && request.resource.data.RESPONSABLE_CORTE_CORREO == request.auth.token.email)
+        || integratedCutWrite();
+
+      allow update: if
+        (isLider() && resource.data.APROBACION_TIPO == "VALIDACION_LIDER_50")
+        || (isGerencia() && resource.data.APROBACION_TIPO == "AUTORIZACION_GERENCIA_MENOR_50")
+        || isGerencia()
+        || (integratedCutWrite()
+          && resource.data.TRAZABILIDAD_SOURCE == "trazabilidadlog"
+          && resource.data.TRAZABILIDAD_CASE_ID == request.resource.data.TRAZABILIDAD_CASE_ID
+          && resource.data.TRAZABILIDAD_CUT_ID == request.resource.data.TRAZABILIDAD_CUT_ID)
+        || (
+          isOperario()
+          && resource.data.SOLICITANTE_UID == request.auth.uid
+          && request.resource.data.SOLICITANTE_UID == request.auth.uid
+          && resource.data.APROBACION_ESTADO == "APROBADO"
+          && request.resource.data.APROBACION_ESTADO == "APROBADO"
+          && request.resource.data.APROBACION_TIPO == resource.data.APROBACION_TIPO
+          && request.resource.data.APROBADO_POR == resource.data.APROBADO_POR
+        );
+
+      allow delete: if isGerencia() || isLider();
+    }
+  }
+}

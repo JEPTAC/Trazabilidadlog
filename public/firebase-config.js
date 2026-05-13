@@ -1,4 +1,4 @@
-export const firebaseConfig = {
+window.firebaseConfig = {
   apiKey: "AIzaSyAyTnCg0vcMo8AEHpVanQyovzAkVkoUXM8",
   authDomain: "trazabilidadlog.firebaseapp.com",
   projectId: "trazabilidadlog",
@@ -8,12 +8,10 @@ export const firebaseConfig = {
   measurementId: "G-YN690LB8B2"
 };
 
-export const appSettings = {
+window.appSettings = {
   companyName: "Electroingeniería",
+  logoPath: "./assets/logo-electroingenieria.jpeg",
   driveUploadUrl: "",
-  drivePublicFolderUrl: "",
-  localFallbackEnabled: true,
-  requireFirebaseForProduction: false,
-  idleRiskMinutes: 25,
-  criticalRiskMinutes: 75
+  maxGerenciaUsers: 2,
+  version: "flujo-secuencial-v6-ios-completo"
 };
